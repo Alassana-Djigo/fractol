@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Fractol"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["pillow>=12.3.0", "numpy>=2.0"]
+dependencies = ["pillow>=12.3.0", "numpy>=2.0", "pygame>=2.5"]
 
 
 [dependency-groups]
