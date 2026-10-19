@@ -14,3 +14,16 @@ def test_render_returns_png(client):
 )
 def test_render_rejects_bad_input(client, query):
     assert client.get(f"/render/?{query}").status_code == 400
+
+
+def test_index_page_loads(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert b"fractol" in response.content.lower()
+
+
+def test_julia_parameters_change_the_image(client):
+    base = "/render/?fractal=julia&w=40&h=30&iter=50"
+    a = client.get(f"{base}&jr=-0.8&ji=0.156")
+    b = client.get(f"{base}&jr=0.285&ji=0.01")
+    assert a.content != b.content
