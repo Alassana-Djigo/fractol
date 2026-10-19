@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Fractol"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["pillow>=12.3.0", "numpy>=2.0", "pygame-ce>=2.5.8"]
+dependencies = ["pillow>=12.3.0", "numpy>=2.0", "pygame-ce>=2.5.8", "django>=5.2"]
 
 
 [dependency-groups]
@@ -13,6 +13,7 @@ dev = [
     "pre-commit>=4.0",
     "pytest>=8.0",
     "ruff>=0.13",
+    "pytest-django>=4.9",
 ]
 
 
@@ -38,6 +39,7 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+DJANGO_SETTINGS_MODULE = "config.settings"
 
 
 [tool.commitizen]
