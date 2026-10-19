@@ -1,0 +1,63 @@
+{% load static %}
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fractol — explorador de fractais</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: flex; font-family: system-ui, sans-serif; background: #0b0b10; color: #e8e8f0; }
+    aside { width: 300px; padding: 16px; overflow-y: auto; border-right: 1px solid #2a2a35; }
+    main { flex: 1; min-width: 0; }
+    canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+    canvas.dragging { cursor: grabbing; }
+    label { display: block; margin: 12px 0 4px; font-size: 14px; }
+    select, input[type=range], button { width: 100%; }
+    button { margin-top: 6px; padding: 8px; }
+    small, #explain { color: #a0a0b0; font-size: 13px; line-height: 1.4; }
+    @media (max-width: 700px) {
+      body { flex-direction: column-reverse; }
+      aside { width: 100%; max-height: 45vh; }
+    }
+  </style>
+</head>
+<body>
+  <aside>
+    <h1>fractol</h1>
+    <label for="fractal">Fractal</label>
+    <select id="fractal">
+      <option value="mandelbrot">Mandelbrot</option>
+      <option value="julia">Julia</option>
+      <option value="burning_ship">Burning Ship</option>
+    </select>
+    <p id="explain"></p>
+
+    <div id="julia-controls" hidden>
+      <label for="jr">c (real): <span id="jr-val"></span></label>
+      <input type="range" id="jr" min="-2" max="2" step="0.001">
+      <label for="ji">c (imaginário): <span id="ji-val"></span></label>
+      <input type="range" id="ji" min="-2" max="2" step="0.001">
+    </div>
+
+    <label for="iter">Iterações: <span id="iter-val"></span></label>
+    <input type="range" id="iter" min="20" max="500" step="10">
+    <label><input type="checkbox" id="auto-iter"> Automáticas (mais detalhe ao ampliar)</label>
+
+    <p>Zoom: <b id="zoom"></b><br>Centro: <span id="coords"></span><br><span id="status"></span></p>
+
+    <button id="reset">Reiniciar (R)</button>
+
+    <label>Locais para explorar (Mandelbrot)</label>
+    <button data-preset="mini">Mini-Mandelbrot (auto-semelhança)</button>
+    <button data-preset="seahorse">Vale dos cavalos-marinhos</button>
+    <button data-preset="spiral">Espiral profunda</button>
+
+    <p><small>Roda do rato: zoom · Arrastar ou setas: mover · +/−: zoom · R: reiniciar</small></p>
+  </aside>
+  <main><canvas id="view"></canvas></main>
+  {{ views|json_script:"views-data" }}
+  <script src="{% static 'explorer/app.js' %}"></script>
+</body>
+</html>
