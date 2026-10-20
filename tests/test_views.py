@@ -27,3 +27,15 @@ def test_julia_parameters_change_the_image(client):
     a = client.get(f"{base}&jr=-0.8&ji=0.156")
     b = client.get(f"{base}&jr=0.285&ji=0.01")
     assert a.content != b.content
+
+
+def test_data_returns_float32_grid(client):
+    response = client.get("/data/?fractal=mandelbrot&w=40&h=30&iter=50")
+    assert response.status_code == 200
+    assert response["Content-Type"] == "application/octet-stream"
+    assert len(response.content) == 40 * 30 * 4
+
+
+@pytest.mark.parametrize("query", ["fractal=nope", "w=0", "iter=99999", "cx=nan"])
+def test_data_rejects_bad_input(client, query):
+    assert client.get(f"/data/?{query}").status_code == 400
