@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from fractol.fractals import FRACTALS, compute_fractal
+from fractol.fractals import FRACTALS, compute_fractal, compute_smooth
 from fractol.render_np import compute_iterations_grid
 
 
@@ -20,3 +20,18 @@ def test_origin_never_escapes(fractal):
 def test_unknown_fractal_raises():
     with pytest.raises(ValueError):
         compute_fractal("nope", 5, 5)
+
+
+def test_smooth_matches_hand_computed_value():
+    # c = 3: z = 3, 12, 147, 21612 -> escapa na 4.ª iteração
+    result = compute_smooth("mandelbrot", 3, 3, 50, center=3 + 0j, scale=1e-6)
+    assert result.dtype == np.float32
+    assert np.allclose(result, 3.15205, atol=1e-3)
+
+
+def test_smooth_marks_interior_and_stays_close_to_integer_count():
+    smooth = compute_smooth("mandelbrot", 60, 40, 80)
+    ints = compute_fractal("mandelbrot", 60, 40, 80)
+    assert (smooth[ints == 80] == -1).all()
+    escaped = smooth >= 0
+    assert (smooth[escaped] > ints[escaped] - 1).all()
