@@ -1,7 +1,9 @@
 import { PALETTES, MODES, buildLut, colorize } from "./coloring.js";
+import { placement, zoomedView } from "./viewport.js";
 
 const VIEWS = JSON.parse(document.getElementById("views-data").textContent);
 const PREVIEW = 0.25;
+const QUALITY = { rapida: 0.5, normal: 1, alta: 1.5 }; // resolução final
 const MAX_SIZE = 1200;
 const MIN_SCALE = 1e-11; // limite prático da precisão float64
 
@@ -42,16 +44,17 @@ const offCtx = off.getContext("2d");
 
 const state = {
   fractal: "mandelbrot", cx: 0, cy: 0, scale: 3,
-  jr: -0.8, ji: 0.156, iter: 100, auto: true,
+  jr: -0.8, ji: 0.156, iter: 100, auto: true, quality: "normal",
   ...DEFAULT_COLOR,
 };
 
 let seq = 0;
 let controller = null;
-let throttle = 0;
+let busy = false; // há uma pré-visualização em curso
+let queued = false; // houve movimento enquanto estava ocupada
 let settle = 0;
 let drag = null;
-let frame = null; // última grelha recebida: { values, w, h }
+let frame = null; // última grelha recebida: { values, w, h, view }
 let image = null;
 let lut = null;
 let offset = 0;
@@ -74,7 +77,14 @@ function rebuildLut() {
   }
 }
 
-function paint() {
+const currentView = () => ({
+  cx: state.cx,
+  cy: state.cy,
+  scale: state.scale,
+  aspect: canvas.height / canvas.width,
+});
+
+function colorFrame() {
   if (!frame) return;
   const { values, w, h } = frame;
   if (off.width !== w || off.height !== h) {
@@ -88,7 +98,22 @@ function paint() {
     offset,
   });
   offCtx.putImageData(image, 0, 0);
-  ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+}
+
+// Desenha a última imagem calculada, deslocada e ampliada para a vista actual:
+// durante o zoom e o movimento a imagem acompanha o rato de imediato, e é
+// substituída quando chega o cálculo novo.
+function present() {
+  if (!frame) return;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const p = placement(frame.view, currentView(), canvas.width);
+  if (p.w > 1 && p.w < canvas.width * 64) ctx.drawImage(off, p.x, p.y, p.w, p.h);
+}
+
+function paint() {
+  colorFrame();
+  present();
 }
 
 function tick(now) {
@@ -122,13 +147,16 @@ async function draw(quality) {
   const id = ++seq;
   controller?.abort();
   controller = new AbortController();
-  const w = Math.max(1, Math.round(canvas.width * quality));
-  const h = Math.max(1, Math.round(canvas.height * quality));
+  const view = currentView();
+  const t0 = performance.now();
+  const k = Math.min(quality, MAX_SIZE / Math.max(canvas.width, canvas.height));
+  const w = Math.max(1, Math.round(canvas.width * k));
+  const h = Math.max(1, Math.round(canvas.height * k));
   const params = new URLSearchParams({
     fractal: state.fractal,
-    cx: state.cx,
-    cy: state.cy,
-    scale: state.scale,
+    cx: view.cx,
+    cy: view.cy,
+    scale: view.scale,
     w,
     h,
     iter: currentIter(),
@@ -140,11 +168,29 @@ async function draw(quality) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const values = new Float32Array(await res.arrayBuffer());
     if (id !== seq || values.length !== w * h) return;
-    frame = { values, w, h };
+    frame = { values, w, h, view: { ...view, aspect: h / w } };
     paint();
-    if (quality === 1) $("status").textContent = "pronto";
+    if (quality !== PREVIEW) {
+      $("status").textContent = `pronto · ${Math.round(performance.now() - t0)} ms`;
+    }
   } catch (err) {
     if (err.name !== "AbortError") $("status").textContent = "erro";
+  }
+}
+
+// No máximo uma pré-visualização em curso: se o rato continua a mexer, pede-se
+// a seguinte quando a anterior chega (nunca se abandona uma antes de chegar).
+async function preview() {
+  if (busy) {
+    queued = true;
+    return;
+  }
+  busy = true;
+  await draw(PREVIEW);
+  busy = false;
+  if (queued) {
+    queued = false;
+    preview();
   }
 }
 
@@ -162,15 +208,14 @@ function updateHud() {
 
 function schedule() {
   updateHud();
+  present();
   $("status").textContent = "a calcular…";
-  if (!throttle) {
-    throttle = setTimeout(() => {
-      throttle = 0;
-      draw(PREVIEW);
-    }, 80);
-  }
+  preview();
   clearTimeout(settle);
-  settle = setTimeout(() => draw(1), 300);
+  settle = setTimeout(() => {
+    queued = false;
+    draw(QUALITY[state.quality]);
+  }, 300);
 }
 
 // ---------- interface ----------
@@ -185,6 +230,7 @@ function syncUi() {
   $("auto-iter").checked = state.auto;
   $("iter").value = state.iter;
   $("explain").textContent = INFO[state.fractal];
+  $("quality").value = state.quality;
   $("palette").value = state.palette;
   $("mode").value = state.mode;
   for (const id of ["period", "brightness", "contrast", "speed"]) {
@@ -208,14 +254,11 @@ function resetAll() {
 }
 
 function zoomAt(fx, fy, factor) {
-  const aspect = canvas.height / canvas.width;
-  const maxScale = VIEWS[state.fractal].scale * 4;
-  const next = Math.min(maxScale, Math.max(MIN_SCALE, state.scale * factor));
-  const re = state.cx + (fx - 0.5) * state.scale;
-  const im = state.cy - (fy - 0.5) * state.scale * aspect;
-  state.cx = re - (fx - 0.5) * next;
-  state.cy = im + (fy - 0.5) * next * aspect;
-  state.scale = next;
+  const next = zoomedView(currentView(), fx, fy, factor, {
+    min: MIN_SCALE,
+    max: VIEWS[state.fractal].scale * 4,
+  });
+  Object.assign(state, { cx: next.cx, cy: next.cy, scale: next.scale });
   schedule();
 }
 
@@ -336,6 +379,11 @@ for (const id of ["period", "brightness", "contrast", "speed"]) {
     paint();
   });
 }
+
+$("quality").addEventListener("change", (e) => {
+  state.quality = e.target.value;
+  schedule();
+});
 
 $("reset").addEventListener("click", resetAll);
 
