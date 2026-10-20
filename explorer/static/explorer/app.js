@@ -1,4 +1,4 @@
-"use strict";
+import { PALETTES, MODES, buildLut, colorize } from "./coloring.js";
 
 const VIEWS = JSON.parse(document.getElementById("views-data").textContent);
 const PREVIEW = 0.25;
@@ -9,7 +9,7 @@ const INFO = {
   mandelbrot:
     "Cada ponto c do plano é testado repetindo z → z² + c a partir de z = 0. " +
     "Se z nunca se afasta, o ponto pertence ao conjunto (preto). " +
-    "Fora dele, o brilho mostra quão depressa escapa.",
+    "Fora dele, a cor mostra quão depressa escapa.",
   julia:
     "Mesma fórmula, mas c é fixo e o ponto testado é o ponto de partida z. " +
     "Mexe em c e vê a forma transformar-se.",
@@ -29,12 +29,21 @@ const PRESETS = {
   },
 };
 
+const DEFAULT_COLOR = {
+  palette: "psicadelico", mode: "ciclico", period: 32,
+  brightness: 1, contrast: 1, speed: 0,
+};
+
 const $ = (id) => document.getElementById(id);
 const canvas = $("view");
 const ctx = canvas.getContext("2d");
+const off = document.createElement("canvas");
+const offCtx = off.getContext("2d");
+
 const state = {
   fractal: "mandelbrot", cx: 0, cy: 0, scale: 3,
   jr: -0.8, ji: 0.156, iter: 100, auto: true,
+  ...DEFAULT_COLOR,
 };
 
 let seq = 0;
@@ -42,6 +51,66 @@ let controller = null;
 let throttle = 0;
 let settle = 0;
 let drag = null;
+let frame = null; // última grelha recebida: { values, w, h }
+let image = null;
+let lut = null;
+let offset = 0;
+let animating = false;
+let lastTick = 0;
+
+// ---------- cor (tudo no cliente: mudar de paleta não recalcula o fractal) ----------
+
+function rebuildLut() {
+  lut = buildLut(PALETTES[state.palette].colors, {
+    brightness: state.brightness,
+    contrast: state.contrast,
+  });
+  const preview = $("lut-preview");
+  const pctx = preview.getContext("2d");
+  for (let x = 0; x < preview.width; x++) {
+    const i = Math.floor((x / preview.width) * 1024) * 3;
+    pctx.fillStyle = `rgb(${lut[i]}, ${lut[i + 1]}, ${lut[i + 2]})`;
+    pctx.fillRect(x, 0, 1, preview.height);
+  }
+}
+
+function paint() {
+  if (!frame) return;
+  const { values, w, h } = frame;
+  if (off.width !== w || off.height !== h) {
+    off.width = w;
+    off.height = h;
+    image = offCtx.createImageData(w, h);
+  }
+  colorize(values, image.data, lut, {
+    mode: state.mode,
+    period: state.period,
+    offset,
+  });
+  offCtx.putImageData(image, 0, 0);
+  ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+}
+
+function tick(now) {
+  if (state.speed === 0) {
+    animating = false;
+    return;
+  }
+  offset += state.speed * ((now - lastTick) / 1000);
+  lastTick = now;
+  paint();
+  requestAnimationFrame(tick);
+}
+
+function updateAnimation() {
+  if (state.speed !== 0 && !animating) {
+    animating = true;
+    lastTick = performance.now();
+    requestAnimationFrame(tick);
+  }
+}
+
+// ---------- cálculo (no servidor) ----------
 
 function currentIter() {
   if (!state.auto) return state.iter;
@@ -53,23 +122,26 @@ async function draw(quality) {
   const id = ++seq;
   controller?.abort();
   controller = new AbortController();
+  const w = Math.max(1, Math.round(canvas.width * quality));
+  const h = Math.max(1, Math.round(canvas.height * quality));
   const params = new URLSearchParams({
     fractal: state.fractal,
     cx: state.cx,
     cy: state.cy,
     scale: state.scale,
-    w: Math.max(1, Math.round(canvas.width * quality)),
-    h: Math.max(1, Math.round(canvas.height * quality)),
+    w,
+    h,
     iter: currentIter(),
     jr: state.jr,
     ji: state.ji,
   });
   try {
-    const res = await fetch(`/render/?${params}`, { signal: controller.signal });
+    const res = await fetch(`/data/?${params}`, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const bitmap = await createImageBitmap(await res.blob());
-    if (id !== seq) return;
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const values = new Float32Array(await res.arrayBuffer());
+    if (id !== seq || values.length !== w * h) return;
+    frame = { values, w, h };
+    paint();
     if (quality === 1) $("status").textContent = "pronto";
   } catch (err) {
     if (err.name !== "AbortError") $("status").textContent = "erro";
@@ -101,6 +173,8 @@ function schedule() {
   settle = setTimeout(() => draw(1), 300);
 }
 
+// ---------- interface ----------
+
 function syncUi() {
   $("fractal").value = state.fractal;
   $("julia-controls").hidden = state.fractal !== "julia";
@@ -111,6 +185,12 @@ function syncUi() {
   $("auto-iter").checked = state.auto;
   $("iter").value = state.iter;
   $("explain").textContent = INFO[state.fractal];
+  $("palette").value = state.palette;
+  $("mode").value = state.mode;
+  for (const id of ["period", "brightness", "contrast", "speed"]) {
+    $(id).value = state[id];
+    $(`${id}-val`).textContent = Number(state[id]).toFixed(id === "period" ? 0 : 2);
+  }
 }
 
 function resetView() {
@@ -120,8 +200,10 @@ function resetView() {
 
 function resetAll() {
   Object.assign(state, { jr: -0.8, ji: 0.156, iter: 100, auto: true });
+  Object.assign(state, DEFAULT_COLOR);
   resetView();
   syncUi();
+  rebuildLut();
   schedule();
 }
 
@@ -150,9 +232,12 @@ canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const fx = e.offsetX / canvas.clientWidth;
-    const fy = e.offsetY / canvas.clientHeight;
-    zoomAt(fx, fy, Math.exp(e.deltaY * 0.0015));
+    const rect = canvas.getBoundingClientRect();
+    const fx = (e.clientX - rect.left) / rect.width;
+    const fy = (e.clientY - rect.top) / rect.height;
+    if (!Number.isFinite(fx) || !Number.isFinite(fy)) return;
+    const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY; // linhas -> píxeis
+    zoomAt(fx, fy, Math.exp(dy * 0.0015));
   },
   { passive: false },
 );
@@ -222,6 +307,35 @@ $("auto-iter").addEventListener("change", (e) => {
   state.auto = e.target.checked;
   schedule();
 });
+
+// Controlos de cor: só recolorem a última grelha, sem pedir nada ao servidor.
+for (const [key, label] of Object.entries(PALETTES)) {
+  $("palette").append(new Option(label.label, key));
+}
+for (const [key, mode] of Object.entries(MODES)) {
+  $("mode").append(new Option(mode.label, key));
+}
+
+$("palette").addEventListener("change", (e) => {
+  state.palette = e.target.value;
+  rebuildLut();
+  paint();
+});
+
+$("mode").addEventListener("change", (e) => {
+  state.mode = e.target.value;
+  paint();
+});
+
+for (const id of ["period", "brightness", "contrast", "speed"]) {
+  $(id).addEventListener("input", (e) => {
+    state[id] = Number(e.target.value);
+    $(`${id}-val`).textContent = state[id].toFixed(id === "period" ? 0 : 2);
+    if (id === "brightness" || id === "contrast") rebuildLut();
+    if (id === "speed") updateAnimation();
+    paint();
+  });
+}
 
 $("reset").addEventListener("click", resetAll);
 
