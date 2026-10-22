@@ -1,15 +1,12 @@
-"""Motor vectorizado: Mandelbrot, Julia e Burning Ship."""
+"""Motor vectorizado: calcula qualquer fórmula registada em `formulas`."""
 
 import numpy as np
 
-FRACTALS = ("mandelbrot", "julia", "burning_ship")
+from fractol.formulas import FORMULAS, Params, resolve_params
 
-DEFAULT_VIEWS = {
-    "mandelbrot": (-0.5 + 0j, 3.0),
-    "julia": (0j, 3.0),
-    "burning_ship": (-0.5 - 0.5j, 4.0),
-}
+FRACTALS = tuple(FORMULAS)
 
+DEFAULT_VIEWS = {key: (f.center, f.scale) for key, f in FORMULAS.items()}
 
 SMOOTH_BAILOUT = 256.0
 
@@ -21,16 +18,19 @@ def _iterate(
     max_iter: int,
     center: complex,
     scale: float,
-    julia_c: complex,
+    params: Params | None,
     bailout: float,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, Params]:
     """
-    Núcleo do cálculo. Devolve (iterations, modulus):
+    Núcleo do cálculo. Devolve (iterations, modulus, params):
     - iterations: nº de iterações até |z| >= bailout (max_iter se nunca escapa);
-    - modulus: |z| no momento em que escapou (0 onde nunca escapou).
+    - modulus: |z| no momento em que escapou (0 onde nunca escapou);
+    - params: valores finais dos parâmetros da fórmula.
     """
-    if fractal not in FRACTALS:
+    if fractal not in FORMULAS:
         raise ValueError(f"fractal desconhecido: {fractal!r}")
+    formula = FORMULAS[fractal]
+    values = resolve_params(formula, params)
 
     half_w = scale / 2
     half_h = half_w * height / width
@@ -39,22 +39,14 @@ def _iterate(
     re_grid, im_grid = np.meshgrid(re, im)
     grid = re_grid + 1j * im_grid
 
-    if fractal == "julia":
-        z = grid.copy()
-        c = np.full_like(grid, julia_c)
-    else:
-        z = np.zeros_like(grid)
-        c = grid
+    z, c = formula.init(grid, values)
 
     iterations = np.zeros(grid.shape, dtype=int)
     modulus = np.zeros(grid.shape, dtype=float)
     active = np.ones(grid.shape, dtype=bool)
 
     for i in range(max_iter):
-        zi = z[active]
-        if fractal == "burning_ship":
-            zi = np.abs(zi.real) + 1j * np.abs(zi.imag)
-        z[active] = zi * zi + c[active]
+        z[active] = formula.step(z[active], c[active], values)
 
         magnitude = np.abs(z[active])
         gone = magnitude >= bailout
@@ -65,7 +57,7 @@ def _iterate(
         active &= ~escaped
 
     iterations[active] = max_iter
-    return iterations, modulus
+    return iterations, modulus, values
 
 
 def compute_fractal(
@@ -75,7 +67,7 @@ def compute_fractal(
     max_iter: int = 100,
     center: complex = -0.5 + 0j,
     scale: float = 3.0,
-    julia_c: complex = -0.8 + 0.156j,
+    params: Params | None = None,
 ) -> np.ndarray:
     """
     Devolve um array (height x width) com o nº de iterações até escapar
@@ -83,10 +75,10 @@ def compute_fractal(
 
     center: ponto do plano complexo no centro da imagem.
     scale: largura da janela no plano complexo (menor = mais zoom).
-    julia_c: constante c, usada só pelo Julia.
+    params: parâmetros da fórmula (os que faltarem usam o valor predefinido).
     """
-    iterations, _ = _iterate(
-        fractal, width, height, max_iter, center, scale, julia_c, bailout=2.0
+    iterations, _, _ = _iterate(
+        fractal, width, height, max_iter, center, scale, params, bailout=2.0
     )
     return iterations
 
@@ -98,20 +90,22 @@ def compute_smooth(
     max_iter: int = 100,
     center: complex = -0.5 + 0j,
     scale: float = 3.0,
-    julia_c: complex = -0.8 + 0.156j,
+    params: Params | None = None,
 ) -> np.ndarray:
     """
     Iteração contínua (sem "degraus" entre bandas), em float32.
 
     Cada pixel que escapa recebe um valor real nu, entre n-1 e n (n = nº de
     iterações). Onde nunca escapa, devolve -1. Usa um raio de fuga grande
-    (256) para o valor variar suavemente; a fórmula assume grau 2 (z² + c).
+    (256) para o valor variar suavemente; o grau da iteração é o parâmetro
+    `power` da fórmula (2 se não tiver).
     """
-    iterations, modulus = _iterate(
-        fractal, width, height, max_iter, center, scale, julia_c, SMOOTH_BAILOUT
+    iterations, modulus, values = _iterate(
+        fractal, width, height, max_iter, center, scale, params, SMOOTH_BAILOUT
     )
+    degree = values.get("power", 2.0)
     out = np.full(iterations.shape, -1.0, dtype=np.float32)
     escaped = modulus > 0
     ratio = np.log(modulus[escaped]) / np.log(SMOOTH_BAILOUT)
-    out[escaped] = iterations[escaped] - np.log2(ratio)
+    out[escaped] = iterations[escaped] - np.log(ratio) / np.log(degree)
     return out

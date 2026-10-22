@@ -1,5 +1,7 @@
 import pytest
 
+from fractol.formulas import FORMULAS
+
 
 def test_render_returns_png(client):
     response = client.get("/render/?fractal=julia&w=40&h=30&iter=20")
@@ -39,3 +41,22 @@ def test_data_returns_float32_grid(client):
 @pytest.mark.parametrize("query", ["fractal=nope", "w=0", "iter=99999", "cx=nan"])
 def test_data_rejects_bad_input(client, query):
     assert client.get(f"/data/?{query}").status_code == 400
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "fractal=multibrot&power=1",
+        "fractal=multibrot&power=9",
+        "fractal=julia&jr=5",
+        "fractal=burning_ship&power=abc",
+    ],
+)
+def test_data_rejects_params_outside_declared_range(client, query):
+    assert client.get(f"/data/?{query}").status_code == 400
+
+
+def test_every_formula_is_served(client):
+    for key in FORMULAS:
+        response = client.get(f"/data/?fractal={key}&w=20&h=10&iter=30")
+        assert response.status_code == 200, key

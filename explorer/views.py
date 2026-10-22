@@ -4,12 +4,8 @@ import math
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import render
 
-from fractol.fractals import (
-    DEFAULT_VIEWS,
-    FRACTALS,
-    compute_fractal,
-    compute_smooth,
-)
+from fractol.formulas import FORMULAS, describe
+from fractol.fractals import compute_fractal, compute_smooth
 from fractol.render_np import grid_to_image
 
 MAX_SIZE = 1200
@@ -17,9 +13,10 @@ MAX_ITER = 500
 
 
 def index(request: HttpRequest) -> HttpResponse:
+    formulas = describe()
     views = {
-        name: {"cx": center.real, "cy": center.imag, "scale": scale}
-        for name, (center, scale) in DEFAULT_VIEWS.items()
+        key: {"cx": f["cx"], "cy": f["cy"], "scale": f["scale"]}
+        for key, f in formulas.items()
     }
     return render(request, "explorer/index.html", {"views": views})
 
@@ -27,27 +24,30 @@ def index(request: HttpRequest) -> HttpResponse:
 def parse_params(request: HttpRequest) -> dict:
     """Lê e valida os parâmetros comuns; levanta ValueError se forem maus."""
     fractal = request.GET.get("fractal", "mandelbrot")
-    if fractal not in FRACTALS:
+    if fractal not in FORMULAS:
         raise ValueError("fractal inválido")
+    formula = FORMULAS[fractal]
 
-    default_center, default_scale = DEFAULT_VIEWS[fractal]
     get = request.GET.get
     try:
         center = complex(
-            float(get("cx", default_center.real)),
-            float(get("cy", default_center.imag)),
+            float(get("cx", formula.center.real)),
+            float(get("cy", formula.center.imag)),
         )
-        julia_c = complex(float(get("jr", -0.8)), float(get("ji", 0.156)))
-        scale = float(get("scale", default_scale))
+        scale = float(get("scale", formula.scale))
         width = int(get("w", 800))
         height = int(get("h", 600))
         max_iter = int(get("iter", 100))
+        params = {p.key: float(get(p.key, p.default)) for p in formula.params}
     except ValueError:
         raise ValueError("parâmetros inválidos") from None
 
-    values = (center.real, center.imag, julia_c.real, julia_c.imag, scale)
+    values = (center.real, center.imag, scale, *params.values())
     if not all(math.isfinite(v) for v in values) or scale <= 0:
         raise ValueError("parâmetros fora dos limites")
+    for p in formula.params:
+        if not p.min <= params[p.key] <= p.max:
+            raise ValueError(f"{p.key} fora dos limites")
     if not (0 < width <= MAX_SIZE and 0 < height <= MAX_SIZE):
         raise ValueError("tamanho fora dos limites")
     if not 0 < max_iter <= MAX_ITER:
@@ -60,7 +60,7 @@ def parse_params(request: HttpRequest) -> dict:
         "max_iter": max_iter,
         "center": center,
         "scale": scale,
-        "julia_c": julia_c,
+        "params": params,
     }
 
 

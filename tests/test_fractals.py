@@ -13,7 +13,8 @@ def test_mandelbrot_matches_previous_renderer():
 
 @pytest.mark.parametrize("fractal", FRACTALS)
 def test_origin_never_escapes(fractal):
-    result = compute_fractal(fractal, 5, 5, 50, center=0j, scale=0.01, julia_c=0j)
+    params = {"jr": 0.0, "ji": 0.0}
+    result = compute_fractal(fractal, 5, 5, 50, 0j, 0.01, params)
     assert (result == 50).all()
 
 
