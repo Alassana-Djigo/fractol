@@ -60,3 +60,7 @@ def test_every_formula_is_served(client):
     for key in FORMULAS:
         response = client.get(f"/data/?fractal={key}&w=20&h=10&iter=30")
         assert response.status_code == 200, key
+
+
+def test_index_embeds_formula_metadata(client):
+    assert b"formulas-data" in client.get("/").content

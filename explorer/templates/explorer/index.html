@@ -18,6 +18,10 @@
     summary { cursor: pointer; font-weight: 600; }
     label { display: block; margin: 12px 0 4px; font-size: 14px; }
     select, input[type=range], button { width: 100%; }
+    input[type=number] { width: 100%; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row input[type=number] { width: 96px; flex: none; }
+    .row input[type=range] { flex: 1; }
     button { margin-top: 6px; padding: 8px; }
     #lut-preview { width: 100%; height: 14px; display: block; border-radius: 3px; margin-top: 8px; }
     small, #explain { color: #a0a0b0; font-size: 13px; line-height: 1.4; }
@@ -30,29 +34,35 @@
 <body>
   <aside>
     <h1>fractol</h1>
-    <p>Zoom: <b id="zoom"></b><br>Centro: <span id="coords"></span><br><span id="status"></span></p>
+    <p>Zoom: <b id="zoom"></b><br><span id="status"></span></p>
     <button id="reset">Reiniciar tudo (R)</button>
 
     <details open>
       <summary>Matemática</summary>
       <label for="fractal">Fractal</label>
-      <select id="fractal">
-        <option value="mandelbrot">Mandelbrot</option>
-        <option value="julia">Julia</option>
-        <option value="burning_ship">Burning Ship</option>
-      </select>
+      <select id="fractal"></select>
       <p id="explain"></p>
-
-      <div id="julia-controls" hidden>
-        <label for="jr">c (real): <span id="jr-val"></span></label>
-        <input type="range" id="jr" min="-2" max="2" step="0.001">
-        <label for="ji">c (imaginário): <span id="ji-val"></span></label>
-        <input type="range" id="ji" min="-2" max="2" step="0.001">
+      <div id="params-block">
+        <div id="params"></div>
       </div>
-
       <label for="iter">Iterações: <span id="iter-val"></span></label>
       <input type="range" id="iter" min="20" max="500" step="10">
       <label><input type="checkbox" id="auto-iter"> Automáticas (mais detalhe ao ampliar)</label>
+    </details>
+
+    <details id="presets-block" open>
+      <summary>Predefinições</summary>
+      <div id="presets"></div>
+    </details>
+
+    <details>
+      <summary>Posição e escala</summary>
+      <label for="v-cx">Centro (real)</label>
+      <input type="number" id="v-cx" step="any">
+      <label for="v-cy">Centro (imaginário)</label>
+      <input type="number" id="v-cy" step="any">
+      <label for="v-scale">Escala (largura da janela)</label>
+      <input type="number" id="v-scale" step="any" min="0">
     </details>
 
     <details open>
@@ -72,7 +82,7 @@
       <input type="range" id="speed" min="-1" max="1" step="0.05">
     </details>
 
-    <details open>
+    <details>
       <summary>Qualidade</summary>
       <label for="quality">Resolução ao parar</label>
       <select id="quality">
@@ -83,17 +93,10 @@
       <small>Enquanto te moves, a imagem é calculada a ¼ da resolução.</small>
     </details>
 
-    <details open>
-      <summary>Locais para explorar (Mandelbrot)</summary>
-      <button data-preset="mini">Mini-Mandelbrot (auto-semelhança)</button>
-      <button data-preset="seahorse">Vale dos cavalos-marinhos</button>
-      <button data-preset="spiral">Espiral profunda</button>
-    </details>
-
     <p><small>Roda do rato: zoom · Arrastar ou setas: mover · +/−: zoom · R: reiniciar</small></p>
   </aside>
   <main><canvas id="view"></canvas></main>
-  {{ views|json_script:"views-data" }}
+  {{ formulas|json_script:"formulas-data" }}
   <script type="module" src="{% static 'explorer/app.js' %}"></script>
 </body>
 </html>

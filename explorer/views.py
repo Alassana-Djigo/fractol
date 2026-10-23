@@ -13,12 +13,7 @@ MAX_ITER = 500
 
 
 def index(request: HttpRequest) -> HttpResponse:
-    formulas = describe()
-    views = {
-        key: {"cx": f["cx"], "cy": f["cy"], "scale": f["scale"]}
-        for key, f in formulas.items()
-    }
-    return render(request, "explorer/index.html", {"views": views})
+    return render(request, "explorer/index.html", {"formulas": describe()})
 
 
 def parse_params(request: HttpRequest) -> dict:

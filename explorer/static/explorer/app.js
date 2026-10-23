@@ -1,50 +1,26 @@
 import { PALETTES, MODES, buildLut, colorize } from "./coloring.js";
 import { placement, zoomedView } from "./viewport.js";
 
-const VIEWS = JSON.parse(document.getElementById("views-data").textContent);
+const $ = (id) => document.getElementById(id);
+const FORMULAS = JSON.parse($("formulas-data").textContent);
 const PREVIEW = 0.25;
 const QUALITY = { rapida: 0.5, normal: 1, alta: 1.5 }; // resolução final
 const MAX_SIZE = 1200;
 const MIN_SCALE = 1e-11; // limite prático da precisão float64
-
-const INFO = {
-  mandelbrot:
-    "Cada ponto c do plano é testado repetindo z → z² + c a partir de z = 0. " +
-    "Se z nunca se afasta, o ponto pertence ao conjunto (preto). " +
-    "Fora dele, a cor mostra quão depressa escapa.",
-  julia:
-    "Mesma fórmula, mas c é fixo e o ponto testado é o ponto de partida z. " +
-    "Mexe em c e vê a forma transformar-se.",
-  burning_ship:
-    "Como o Mandelbrot, mas com o valor absoluto das partes real e " +
-    "imaginária antes de elevar ao quadrado. Daí os 'navios em chamas'.",
-};
-
-const PRESETS = {
-  mini: { fractal: "mandelbrot", cx: -1.7548776662466927, cy: 0, scale: 0.08 },
-  seahorse: { fractal: "mandelbrot", cx: -0.75, cy: 0.1, scale: 0.1 },
-  spiral: {
-    fractal: "mandelbrot",
-    cx: -0.7436438870371587,
-    cy: 0.13182590420531197,
-    scale: 0.0005,
-  },
-};
 
 const DEFAULT_COLOR = {
   palette: "psicadelico", mode: "ciclico", period: 32,
   brightness: 1, contrast: 1, speed: 0,
 };
 
-const $ = (id) => document.getElementById(id);
 const canvas = $("view");
 const ctx = canvas.getContext("2d");
 const off = document.createElement("canvas");
 const offCtx = off.getContext("2d");
 
 const state = {
-  fractal: "mandelbrot", cx: 0, cy: 0, scale: 3,
-  jr: -0.8, ji: 0.156, iter: 100, auto: true, quality: "normal",
+  fractal: "mandelbrot", cx: 0, cy: 0, scale: 3, params: {},
+  iter: 100, auto: true, quality: "normal",
   ...DEFAULT_COLOR,
 };
 
@@ -60,6 +36,12 @@ let lut = null;
 let offset = 0;
 let animating = false;
 let lastTick = 0;
+
+const formula = () => FORMULAS[state.fractal];
+const defaultParams = (key) =>
+  Object.fromEntries(FORMULAS[key].params.map((p) => [p.key, p.default]));
+
+state.params = defaultParams(state.fractal);
 
 // ---------- cor (tudo no cliente: mudar de paleta não recalcula o fractal) ----------
 
@@ -139,7 +121,7 @@ function updateAnimation() {
 
 function currentIter() {
   if (!state.auto) return state.iter;
-  const depth = Math.log2(VIEWS[state.fractal].scale / state.scale);
+  const depth = Math.log2(formula().scale / state.scale);
   return Math.round(Math.min(500, Math.max(60, 80 + 35 * Math.max(0, depth))));
 }
 
@@ -152,7 +134,7 @@ async function draw(quality) {
   const k = Math.min(quality, MAX_SIZE / Math.max(canvas.width, canvas.height));
   const w = Math.max(1, Math.round(canvas.width * k));
   const h = Math.max(1, Math.round(canvas.height * k));
-  const params = new URLSearchParams({
+  const query = new URLSearchParams({
     fractal: state.fractal,
     cx: view.cx,
     cy: view.cy,
@@ -160,11 +142,10 @@ async function draw(quality) {
     w,
     h,
     iter: currentIter(),
-    jr: state.jr,
-    ji: state.ji,
+    ...state.params,
   });
   try {
-    const res = await fetch(`/data/?${params}`, { signal: controller.signal });
+    const res = await fetch(`/data/?${query}`, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const values = new Float32Array(await res.arrayBuffer());
     if (id !== seq || values.length !== w * h) return;
@@ -194,16 +175,21 @@ async function preview() {
   }
 }
 
+function showView() {
+  const fields = { "v-cx": state.cx, "v-cy": state.cy, "v-scale": state.scale };
+  for (const [id, value] of Object.entries(fields)) {
+    if (document.activeElement !== $(id)) $(id).value = value.toPrecision(15);
+  }
+}
+
 function updateHud() {
-  const zoom = VIEWS[state.fractal].scale / state.scale;
+  const zoom = formula().scale / state.scale;
   $("zoom").textContent =
     zoom < 1000 ? `${zoom.toFixed(1)}×` : `${zoom.toExponential(2)}×`;
-  const sign = state.cy < 0 ? "−" : "+";
-  $("coords").textContent =
-    `${state.cx.toPrecision(12)} ${sign} ${Math.abs(state.cy).toPrecision(12)}i`;
   const it = currentIter();
   $("iter-val").textContent = it;
   if (state.auto) $("iter").value = it;
+  showView();
 }
 
 function schedule() {
@@ -220,16 +206,81 @@ function schedule() {
 
 // ---------- interface ----------
 
+// ---------- interface gerada a partir das fórmulas ----------
+
+// Um controlo (campo numérico + barra) por cada parâmetro da fórmula ativa.
+function buildParams() {
+  const box = $("params");
+  box.replaceChildren();
+
+  for (const p of formula().params) {
+    const label = document.createElement("label");
+    label.textContent = p.label;
+
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const number = document.createElement("input");
+    const range = document.createElement("input");
+    number.type = "number";
+    range.type = "range";
+
+    for (const input of [number, range]) {
+      Object.assign(input, { min: p.min, max: p.max, step: p.step });
+      input.value = state.params[p.key];
+    }
+
+    const set = (raw) => {
+      if (!Number.isFinite(raw)) return;
+      const value = Math.min(p.max, Math.max(p.min, raw));
+      state.params[p.key] = value;
+      number.value = value;
+      range.value = value;
+      schedule();
+    };
+
+    range.addEventListener("input", () => set(Number(range.value)));
+    number.addEventListener("change", () => set(Number(number.value)));
+
+    row.append(number, range);
+    box.append(label, row);
+  }
+
+  $("params-block").hidden = !formula().params.length;
+}
+
+function buildPresets() {
+  const box = $("presets");
+  box.replaceChildren();
+
+  for (const preset of formula().presets) {
+    const button = document.createElement("button");
+    button.textContent = preset.label;
+
+    button.addEventListener("click", () => {
+      Object.assign(state, {
+        cx: preset.cx,
+        cy: preset.cy,
+        scale: preset.scale,
+      });
+      state.params = { ...defaultParams(state.fractal), ...preset.params };
+      buildParams();
+      schedule();
+    });
+
+    box.append(button);
+  }
+
+  $("presets-block").hidden = !formula().presets.length;
+}
+
 function syncUi() {
   $("fractal").value = state.fractal;
-  $("julia-controls").hidden = state.fractal !== "julia";
-  $("jr").value = state.jr;
-  $("ji").value = state.ji;
-  $("jr-val").textContent = state.jr.toFixed(3);
-  $("ji-val").textContent = state.ji.toFixed(3);
   $("auto-iter").checked = state.auto;
   $("iter").value = state.iter;
-  $("explain").textContent = INFO[state.fractal];
+  $("explain").textContent = formula().description;
+  buildParams();
+  buildPresets();
   $("quality").value = state.quality;
   $("palette").value = state.palette;
   $("mode").value = state.mode;
@@ -240,13 +291,21 @@ function syncUi() {
 }
 
 function resetView() {
-  const v = VIEWS[state.fractal];
-  Object.assign(state, { cx: v.cx, cy: v.cy, scale: v.scale });
+  const f = formula();
+  Object.assign(state, { cx: f.cx, cy: f.cy, scale: f.scale });
+}
+
+function selectFormula(key) {
+  state.fractal = key;
+  state.params = defaultParams(key);
+  resetView();
+  syncUi();
+  schedule();
 }
 
 function resetAll() {
-  Object.assign(state, { jr: -0.8, ji: 0.156, iter: 100, auto: true });
-  Object.assign(state, DEFAULT_COLOR);
+  Object.assign(state, { iter: 100, auto: true }, DEFAULT_COLOR);
+  state.params = defaultParams(state.fractal);
   resetView();
   syncUi();
   rebuildLut();
@@ -256,7 +315,7 @@ function resetAll() {
 function zoomAt(fx, fy, factor) {
   const next = zoomedView(currentView(), fx, fy, factor, {
     min: MIN_SCALE,
-    max: VIEWS[state.fractal].scale * 4,
+    max: formula().scale * 4,
   });
   Object.assign(state, { cx: next.cx, cy: next.cy, scale: next.scale });
   schedule();
@@ -324,17 +383,24 @@ window.addEventListener("keydown", (e) => {
   schedule();
 });
 
-$("fractal").addEventListener("change", (e) => {
-  state.fractal = e.target.value;
-  resetView();
-  syncUi();
-  schedule();
-});
+for (const [key, f] of Object.entries(FORMULAS)) {
+  $("fractal").append(new Option(f.label, key));
+}
 
-for (const id of ["jr", "ji"]) {
-  $(id).addEventListener("input", (e) => {
-    state[id] = parseFloat(e.target.value);
-    $(`${id}-val`).textContent = state[id].toFixed(3);
+$("fractal").addEventListener("change", (e) => selectFormula(e.target.value));
+
+// Coordenadas e escala editáveis (campos numéricos).
+for (const [id, field] of [["v-cx", "cx"], ["v-cy", "cy"], ["v-scale", "scale"]]) {
+  $(id).addEventListener("change", (e) => {
+    const value = Number(e.target.value);
+    if (!Number.isFinite(value)) return;
+
+    if (field === "scale") {
+      state.scale = Math.min(formula().scale * 4, Math.max(MIN_SCALE, value));
+    } else {
+      state[field] = value;
+    }
+
     schedule();
   });
 }
@@ -352,8 +418,8 @@ $("auto-iter").addEventListener("change", (e) => {
 });
 
 // Controlos de cor: só recolorem a última grelha, sem pedir nada ao servidor.
-for (const [key, label] of Object.entries(PALETTES)) {
-  $("palette").append(new Option(label.label, key));
+for (const [key, palette] of Object.entries(PALETTES)) {
+  $("palette").append(new Option(palette.label, key));
 }
 for (const [key, mode] of Object.entries(MODES)) {
   $("mode").append(new Option(mode.label, key));
@@ -386,14 +452,6 @@ $("quality").addEventListener("change", (e) => {
 });
 
 $("reset").addEventListener("click", resetAll);
-
-document.querySelectorAll("[data-preset]").forEach((button) => {
-  button.addEventListener("click", () => {
-    Object.assign(state, PRESETS[button.dataset.preset]);
-    syncUi();
-    schedule();
-  });
-});
 
 document.querySelector("aside").addEventListener("change", (e) => e.target.blur());
 
