@@ -1,5 +1,6 @@
 import pytest
 
+from explorer.cache import DATA_CACHE
 from fractol.formulas import FORMULAS
 
 
@@ -31,11 +32,12 @@ def test_julia_parameters_change_the_image(client):
     assert a.content != b.content
 
 
-def test_data_returns_float32_grid(client):
+def test_data_returns_uint16_grid(client):
     response = client.get("/data/?fractal=mandelbrot&w=40&h=30&iter=50")
     assert response.status_code == 200
     assert response["Content-Type"] == "application/octet-stream"
-    assert len(response.content) == 40 * 30 * 4
+    assert response["X-Nu-Scale"] == "64"
+    assert len(response.content) == 40 * 30 * 2
 
 
 @pytest.mark.parametrize("query", ["fractal=nope", "w=0", "iter=99999", "cx=nan"])
@@ -64,3 +66,23 @@ def test_every_formula_is_served(client):
 
 def test_index_embeds_formula_metadata(client):
     assert b"formulas-data" in client.get("/").content
+
+
+def test_data_is_cached_and_reports_it(client):
+    DATA_CACHE.clear()
+    url = "/data/?fractal=julia&w=30&h=20&iter=40&jr=-0.4&ji=0.6"
+    first = client.get(url)
+    second = client.get(url)
+    other = client.get(url + "&power=3")
+    assert first["X-Cache"] == "miss"
+    assert second["X-Cache"] == "hit"
+    assert first.content == second.content
+    assert other["X-Cache"] == "miss"
+    assert other.content != first.content
+
+
+def test_data_is_gzipped_when_the_browser_accepts_it(client):
+    response = client.get(
+        "/data/?w=60&h=40&iter=30", headers={"accept-encoding": "gzip"}
+    )
+    assert response["Content-Encoding"] == "gzip"

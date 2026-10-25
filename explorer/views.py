@@ -8,6 +8,9 @@ from fractol.formulas import FORMULAS, describe
 from fractol.fractals import compute_fractal, compute_smooth
 from fractol.render_np import grid_to_image
 
+from .cache import DATA_CACHE
+from .encoding import NU_SCALE, quantize
+
 MAX_SIZE = 1200
 MAX_ITER = 500
 
@@ -72,17 +75,40 @@ def render_fractal(request: HttpRequest) -> HttpResponse:
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
 
-def fractal_data(request: HttpRequest) -> HttpResponse:
-    """GET /data/ — iteração contínua em float32 (little-endian), linha a linha.
+def cache_key(params: dict) -> tuple:
+    center = params["center"]
+    return (
+        params["fractal"],
+        params["width"],
+        params["height"],
+        params["max_iter"],
+        center.real,
+        center.imag,
+        params["scale"],
+        tuple(sorted(params["params"].items())),
+    )
 
-    A cor é aplicada no cliente, por isso mudar de paleta não recalcula nada.
+
+def fractal_data(request: HttpRequest) -> HttpResponse:
+    """GET /data/ — iteração contínua em uint16 (little-endian), linha a linha.
+
+    Cada valor é a iteração contínua vezes X-Nu-Scale; 65535 marca os píxeis
+    que nunca escapam. A cor é aplicada no cliente, por isso mudar de paleta
+    não recalcula nada. Os resultados ficam em cache (cabeçalho X-Cache).
     """
     try:
         params = parse_params(request)
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc))
 
-    values = compute_smooth(**params)
-    return HttpResponse(
-        values.astype("<f4").tobytes(), content_type="application/octet-stream"
-    )
+    key = cache_key(params)
+    body = DATA_CACHE.get(key)
+    hit = body is not None
+    if not hit:
+        body = quantize(compute_smooth(**params)).tobytes()
+        DATA_CACHE.put(key, body)
+
+    response = HttpResponse(body, content_type="application/octet-stream")
+    response["X-Nu-Scale"] = str(NU_SCALE)
+    response["X-Cache"] = "hit" if hit else "miss"
+    return response
