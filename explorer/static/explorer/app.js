@@ -68,7 +68,7 @@ const currentView = () => ({
 
 function colorFrame() {
   if (!frame) return;
-  const { values, w, h } = frame;
+  const { values, w, h, nuScale } = frame;
   if (off.width !== w || off.height !== h) {
     off.width = w;
     off.height = h;
@@ -78,6 +78,7 @@ function colorFrame() {
     mode: state.mode,
     period: state.period,
     offset,
+    nuScale,
   });
   offCtx.putImageData(image, 0, 0);
 }
@@ -147,9 +148,10 @@ async function draw(quality) {
   try {
     const res = await fetch(`/data/?${query}`, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const values = new Float32Array(await res.arrayBuffer());
+    const nuScale = Number(res.headers.get("X-Nu-Scale"));
+    const values = new Uint16Array(await res.arrayBuffer());
     if (id !== seq || values.length !== w * h) return;
-    frame = { values, w, h, view: { ...view, aspect: h / w } };
+    frame = { values, w, h, nuScale, view: { ...view, aspect: h / w } };
     paint();
     if (quality !== PREVIEW) {
       $("status").textContent = `pronto · ${Math.round(performance.now() - t0)} ms`;

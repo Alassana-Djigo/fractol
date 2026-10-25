@@ -1,7 +1,9 @@
 // Sistema de cor, independente da matemática: recebe valores de iteração
-// contínua (nu >= 0; negativo = ponto que nunca escapa) e devolve pixéis.
+// contínua e devolve pixéis. Os valores chegam do servidor como uint16:
+// iteração × nuScale, com INTERIOR a marcar os pontos que nunca escapam.
 
 export const LUT_SIZE = 1024; // potência de 2 (permite usar & em vez de %)
+export const INTERIOR = 0xffff; // valor reservado: o ponto nunca escapa
 
 // Paletas cíclicas, com paragens equidistantes (a última volta à primeira).
 export const PALETTES = {
@@ -78,17 +80,17 @@ export function buildLut(colors, { brightness = 1, contrast = 1 } = {}) {
   return lut;
 }
 
-// values: Float32Array; out: Uint8ClampedArray RGBA do mesmo tamanho em píxeis.
-export function colorize(values, out, lut, { mode, period, offset }) {
+// values: Uint16Array; out: Uint8ClampedArray RGBA do mesmo tamanho em píxeis.
+export function colorize(values, out, lut, { mode, period, offset, nuScale }) {
   const phase = MODES[mode].phase;
   for (let i = 0, o = 0; i < values.length; i++, o += 4) {
-    const nu = values[i];
-    if (nu < 0) {
+    const raw = values[i];
+    if (raw === INTERIOR) {
       out[o] = 0;
       out[o + 1] = 0;
       out[o + 2] = 0;
     } else {
-      const u = phase(nu, period) + offset;
+      const u = phase(raw / nuScale, period) + offset;
       const idx = (((u - Math.floor(u)) * LUT_SIZE) | 0) & (LUT_SIZE - 1);
       out[o] = lut[idx * 3];
       out[o + 1] = lut[idx * 3 + 1];
