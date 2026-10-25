@@ -41,22 +41,28 @@ def _iterate(
 
     z, c = formula.init(grid, values)
 
-    iterations = np.zeros(grid.shape, dtype=int)
-    modulus = np.zeros(grid.shape, dtype=float)
-    active = np.ones(grid.shape, dtype=bool)
+    # Só os píxeis que ainda não escaparam continuam na conta: a cada passo
+    # os que escapam saem dos arrays, que vão encolhendo (em vez de se
+    # percorrer sempre a imagem inteira). `idx` guarda a posição de cada um.
+    iterations = np.full(grid.size, max_iter, dtype=int)
+    modulus = np.zeros(grid.size, dtype=float)
+    idx = np.arange(grid.size)
+    z, c = z.ravel(), c.ravel()
 
     for i in range(max_iter):
-        z[active] = formula.step(z[active], c[active], values)
-
-        magnitude = np.abs(z[active])
+        z = formula.step(z, c, values)
+        magnitude = np.abs(z)
         gone = magnitude >= bailout
-        escaped = np.zeros_like(active)
-        escaped[active] = gone
-        iterations[escaped] = i + 1
-        modulus[escaped] = magnitude[gone]
-        active &= ~escaped
+        if gone.any():
+            iterations[idx[gone]] = i + 1
+            modulus[idx[gone]] = magnitude[gone]
+            keep = ~gone
+            idx, z, c = idx[keep], z[keep], c[keep]
+            if idx.size == 0:
+                break
 
-    iterations[active] = max_iter
+    iterations = iterations.reshape(grid.shape)
+    modulus = modulus.reshape(grid.shape)
     return iterations, modulus, values
 
 
