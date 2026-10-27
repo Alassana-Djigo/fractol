@@ -1,5 +1,7 @@
 """Motor vectorizado: calcula qualquer fórmula registada em `formulas`."""
 
+from collections.abc import Callable
+
 import numpy as np
 
 from fractol.formulas import FORMULAS, Params, resolve_params
@@ -11,6 +13,10 @@ DEFAULT_VIEWS = {key: (f.center, f.scale) for key, f in FORMULAS.items()}
 SMOOTH_BAILOUT = 256.0
 
 
+class Cancelled(Exception):
+    """O cálculo foi interrompido porque já não é preciso."""
+
+
 def _iterate(
     fractal: str,
     width: int,
@@ -20,6 +26,7 @@ def _iterate(
     scale: float,
     params: Params | None,
     bailout: float,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, Params]:
     """
     Núcleo do cálculo. Devolve (iterations, modulus, params):
@@ -50,6 +57,8 @@ def _iterate(
     z, c = z.ravel(), c.ravel()
 
     for i in range(max_iter):
+        if should_stop is not None and i % 4 == 0 and should_stop():
+            raise Cancelled
         z = formula.step(z, c, values)
         magnitude = np.abs(z)
         gone = magnitude >= bailout
@@ -97,6 +106,7 @@ def compute_smooth(
     center: complex = -0.5 + 0j,
     scale: float = 3.0,
     params: Params | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> np.ndarray:
     """
     Iteração contínua (sem "degraus" entre bandas), em float32.
@@ -105,9 +115,20 @@ def compute_smooth(
     iterações). Onde nunca escapa, devolve -1. Usa um raio de fuga grande
     (256) para o valor variar suavemente; o grau da iteração é o parâmetro
     `power` da fórmula (2 se não tiver).
+
+    should_stop: função chamada de vez em quando; se devolver verdade, o
+    cálculo pára e levanta Cancelled.
     """
     iterations, modulus, values = _iterate(
-        fractal, width, height, max_iter, center, scale, params, SMOOTH_BAILOUT
+        fractal,
+        width,
+        height,
+        max_iter,
+        center,
+        scale,
+        params,
+        SMOOTH_BAILOUT,
+        should_stop,
     )
     degree = values.get("power", 2.0)
     out = np.full(iterations.shape, -1.0, dtype=np.float32)
