@@ -7,6 +7,9 @@ const PREVIEW = 0.25;
 const QUALITY = { rapida: 0.5, normal: 1, alta: 1.5 }; // resolução final
 const MAX_SIZE = 1200;
 const MIN_SCALE = 1e-11; // limite prático da precisão float64
+// Identifica esta página junto do servidor, para ele largar pedidos antigos.
+const CLIENT_ID =
+  globalThis.crypto?.randomUUID?.() ?? (Math.random().toString(36).slice(2) || "anon");
 
 const DEFAULT_COLOR = {
   palette: "psicadelico", mode: "ciclico", period: 32,
@@ -143,10 +146,13 @@ async function draw(quality) {
     w,
     h,
     iter: currentIter(),
+    client: CLIENT_ID,
+    rid: id,
     ...state.params,
   });
   try {
     const res = await fetch(`/data/?${query}`, { signal: controller.signal });
+    if (res.status === 204) return; // o servidor largou-o: já há um mais recente
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const nuScale = Number(res.headers.get("X-Nu-Scale"));
     const values = new Uint16Array(await res.arrayBuffer());

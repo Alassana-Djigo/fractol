@@ -86,3 +86,18 @@ def test_data_is_gzipped_when_the_browser_accepts_it(client):
         "/data/?w=60&h=40&iter=30", headers={"accept-encoding": "gzip"}
     )
     assert response["Content-Encoding"] == "gzip"
+
+
+def test_stale_request_is_dropped_with_204(client):
+    DATA_CACHE.clear()
+    new = client.get("/data/?w=30&h=20&iter=40&client=pagina1&rid=5")
+    old = client.get("/data/?w=31&h=20&iter=40&client=pagina1&rid=3")
+    assert new.status_code == 200
+    assert old.status_code == 204
+    assert old.content == b""
+
+
+def test_request_ids_are_optional_and_validated(client):
+    assert client.get("/data/?w=30&h=20&iter=40").status_code == 200
+    assert client.get("/data/?w=30&h=20&client=a b&rid=1").status_code == 400
+    assert client.get("/data/?w=30&h=20&client=ok&rid=x").status_code == 400
