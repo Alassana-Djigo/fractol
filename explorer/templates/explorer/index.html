@@ -97,6 +97,7 @@
   </aside>
   <main><canvas id="view"></canvas></main>
   {{ formulas|json_script:"formulas-data" }}
+  {{ limits|json_script:"limits-data" }}
   <script type="module" src="{% static 'explorer/app.js' %}"></script>
 </body>
 </html>

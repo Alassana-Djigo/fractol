@@ -5,7 +5,8 @@ const $ = (id) => document.getElementById(id);
 const FORMULAS = JSON.parse($("formulas-data").textContent);
 const PREVIEW = 0.25;
 const QUALITY = { rapida: 0.5, normal: 1, alta: 1.5 }; // resolução final
-const MAX_SIZE = 1200;
+const LIMITS = JSON.parse($("limits-data").textContent);
+const MAX_SIZE = LIMITS.maxSize;
 const MIN_SCALE = 1e-11; // limite prático da precisão float64
 // Identifica esta página junto do servidor, para ele largar pedidos antigos.
 const CLIENT_ID =
@@ -126,7 +127,7 @@ function updateAnimation() {
 function currentIter() {
   if (!state.auto) return state.iter;
   const depth = Math.log2(formula().scale / state.scale);
-  return Math.round(Math.min(500, Math.max(60, 80 + 35 * Math.max(0, depth))));
+  return Math.round(Math.min(LIMITS.maxIter, Math.max(60, 80 + 35 * Math.max(0, depth))));
 }
 
 async function draw(quality) {
@@ -463,5 +464,6 @@ $("reset").addEventListener("click", resetAll);
 
 document.querySelector("aside").addEventListener("change", (e) => e.target.blur());
 
+$("iter").max = LIMITS.maxIter;
 new ResizeObserver(resize).observe(canvas);
 resetAll();

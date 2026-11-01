@@ -1,5 +1,6 @@
 import io
 import math
+import os
 import re
 
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
@@ -13,14 +14,18 @@ from .cache import DATA_CACHE
 from .encoding import NU_SCALE, quantize
 from .latest import LATEST
 
-MAX_SIZE = 1200
-MAX_ITER = 500
+MAX_SIZE = int(os.environ.get("FRACTOL_MAX_SIZE", "1200"))
+MAX_ITER = int(os.environ.get("FRACTOL_MAX_ITER", "500"))
 CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 REQUEST_NUMBER = re.compile(r"[0-9]{1,12}")
 
 
 def index(request: HttpRequest) -> HttpResponse:
-    return render(request, "explorer/index.html", {"formulas": describe()})
+    context = {
+        "formulas": describe(),
+        "limits": {"maxSize": MAX_SIZE, "maxIter": MAX_ITER},
+    }
+    return render(request, "explorer/index.html", context)
 
 
 def parse_params(request: HttpRequest) -> dict:
